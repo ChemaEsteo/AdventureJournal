@@ -1,11 +1,21 @@
-DIARIO DE AVENTURAS — WORLD OF WARCRAFT CLASSIC ERA
-Versión 1.1.0-Era | Interfaz objetivo: 11509 (Classic Era 1.15.9)
+DIARIO DE AVENTURAS — WORLD OF WARCRAFT FOREVER Y CLASSIC ERA
+Versión 1.2.0-dev | Interfaces: 16001 (Forever) y 11509 (Classic Era 1.15.9)
 
 CONTENIDO
-- AdventureJournal.toc: manifiesto Classic Era y guardado por personaje.
-- AdventureJournal.lua: lógica, eventos, narración e interfaz del libro.
+- AdventureJournal_Forever.toc / AdventureJournal_Vanilla.toc: manifiestos de cada cliente.
+- Los archivos .lua (Compat, Database, Narrative, Events, Conversations, Edits, Import, UI, Options, Commands).
 - Bindings.xml: acción para asignar una tecla desde Key Bindings.
+- Textures\tiled.tga (fondo del libro) y Textures\edit.tga (icono del lápiz; puedes cambiarlo por el tuyo).
 - ExportarDiario.py / ExportarDiario.bat: exportador a TXT para Windows.
+
+NOVEDADES
+- Pestañas en el libro: «Acontecimientos» y «Conversaciones». Las conversaciones solo se guardan y se muestran si
+  las activas (/diario conversaciones on o en las opciones).
+- Un lápiz junto a cada párrafo: pulsa para reescribir la frase con tus palabras y/o añadir una descripción debajo.
+  La frase original no se pierde: «Volver al original» la recupera (pulsa dos veces para confirmar).
+- Botón «Eliminar» en la barra del libro: borra la jornada que estás viendo (pide confirmación) y las siguientes
+  suben de número. No se puede borrar la jornada en curso. /diario limpiar quita de una vez las jornadas vacías.
+- Tu icono propio: guarda un TGA de 32x32 con transparencia como Textures\edit.tga (sustituye al lápiz).
 
 INSTALACIÓN
 1. Cierra WoW Classic Era.
@@ -23,6 +33,7 @@ ABRIR EL DIARIO
 - /journal
 - /diario hoy
 - /diario anterior
+- /diario opciones  y  /diario limpiar
 
 ASIGNAR UNA TECLA
 1. Pulsa ESC y abre Opciones > Asignación de teclas / Key Bindings.
@@ -31,7 +42,7 @@ ASIGNAR UNA TECLA
 4. No hay tecla predeterminada para evitar conflictos con otros controles.
 
 JORNADAS Y GUARDADO
-Cada evento PLAYER_LOGIN crea una jornada nueva, incluso si vuelves a entrar el mismo día del calendario. Esto conserva expresamente el criterio de una jornada por sesión de juego. Un /reload también vuelve a disparar el ciclo de inicio de sesión y puede crear otra jornada.
+Cada inicio de sesión crea una jornada nueva, incluso si vuelves a entrar el mismo día del calendario. Un /reload continúa la jornada actual.
 
 El TOC usa SavedVariablesPerCharacter. El juego guarda los datos por separado para cada personaje en una ruta similar a:
 WTF\Account\<CUENTA>\<REINO>\<PERSONAJE>\SavedVariables\AdventureJournal.lua

@@ -31,6 +31,8 @@ All changes must keep both clients working. A change that fixes Forever and brea
 | `Database.lua` | `ns.EnsureDatabase()`, `ns.SCHEMA_VERSION`, migrations, `ns.DEFAULT_SETTINGS`, the entry-type table `ns.TYPE_INFO`, and the settings helpers (`ns.GetSetting`, `ns.SetSetting`, `ns.IsTypeEnabled`, `ns.SetTypeEnabled`, `ns.TypeFromWord`). Caches the table as `ns.DB`. |
 | `Messages.lua` | M6: turns what the game says into entries for the types added in M6 (LEVEL, GROUP, REPUTATION, SKILL, SPELL). One parser per type, used by **both** the live handlers and the AJProbe import, so a live and an imported entry are the same entry. Patterns are built from the client's own global strings (`ns.GlobalFormats`), never from a Spanish literal. Also `ns.DEDUPE_WINDOW`, `ns.NewTypeSubject`, `ns.OnceKey`, `ns.SKILL_STEP` and `ns.GetMessageStatus` (for `/diario diag`). |
 | `Narrative.lua` | Moods and Spanish prose templates: `ns.ChooseMood`, `ns.ComposeEntry`. |
+| `Edits.lua` | The player's own wording of an entry (`userText`, `userNote`) and the edit window opened by the pencil icon. |
+| `Textures/edit.tga` | The pencil icon next to each paragraph (32x32, 32-bit TGA with alpha). Replace it with your own (same name). |
 | `Events.lua` | Event registration and handlers (one function per event), `ns.AddEntry`, session start/end, and the dispatcher that runs each handler under `pcall` (error isolation, debug output). |
 | `Conversations.lua` | M4b: the opt-in RP conversation log: the chat filter ported from AJProbe, `ns.UpdateConversationEvents` (events are registered only while the option is on), and the text formatting the book uses. |
 | `Import.lua` | M4b: `/diario importar`. Reads AJProbe's records (`AJProbeDB`, read only), plans and then applies the backfill; `ns.PlanImport`, `ns.ApplyImport`, `ns.RunImport`. |
@@ -201,6 +203,26 @@ Each client keeps its own `WTF` folder (`_forever_\WTF\...` and `_classic_era_\W
 
 **Profiles (T1, UI in T5).** `ns.PROFILES` holds the values a profile writes; `ns.ApplyProfile(name)` writes them and returns the list of what changed (only what the player can see: chat, loot threshold, enemy in deaths, and the types this client can log). **clásico** is what Chema's diary did: `chat = "all"`, `lootQuality = 4`, `deathKiller = true`, NPC / CHAT / LEVEL / GROUP / REPUTATION / SKILL / SPELL off, his own types on (REVISIT included, despite its `default = false`). **ampliado** is this line's defaults. A type a profile does not list gets its `TYPE_INFO` default. A fresh diary gets ampliado's values (decision D1 in the transition plan is still open). `TYPE_INFO` rows may carry `default = false`; a type the player never set uses that default. `settings.profile` only records the last profile applied: `ns.ProfileStatus()` compares the settings with both profiles and says "Clásico", "Ampliado", or "<last>, con cambios" (settings that equal the other profile are named after it). A diary with `origin = "chema"` gets a one-time hint in the chat at the first loading screen after T5 (`chemaHintShown`): its diary was kept whole, it logs what it logged before, and `/diario perfil ampliado` or the panel shows more.
 
+### Own wording of entries
+
+Requested 2026-11-09; builds on the existing engine, changes no stored data.
+
+**Tabs in the book.** The page has two tabs, *Acontecimientos* and *Conversaciones* (the active one is the disabled button). The conversations tab is always there; while `settings.conversations` is off it only says so and shows nothing stored. Paging of long conversation lists sits under the tabs.
+
+**Edit icon (`Edits.lua`).** Each event paragraph has a pencil icon (`Textures/edit.tga`, path in `ns.EDIT_ICON`) that opens a window with the sentence prefilled and a second box for a description. Saved next to the entry, never over it:
+
+| Field | Meaning |
+|---|---|
+| `entry.userText` | The player's version of the sentence. Absent: the generated `prose` is shown. A text equal to the generated one is not stored. |
+| `entry.userNote` | A description shown under the sentence (blue). |
+| `entry.editedAt` | Epoch of the last edit. |
+
+`prose`, `text` and the rest of the entry are untouched, so *Volver al original* (second click confirms) restores everything, the import's duplicate detection is unaffected, and diaries of every earlier version load as before (no schema bump). User text is shown literally (`|` is escaped). The icon is fully opaque on an edited paragraph and dimmed otherwise. Conversations (other players' words) and the `/diario debug demo` diary have no icons. The exporter (`ExportarDiario.py`) writes `userText` instead of the prose, and `userNote` indented under it. **To use your own icon:** save a 32x32 (or 64x64) 32-bit TGA with alpha as `Textures\edit.tga`, overwriting the default pencil; any power-of-two size works, and the file must be uncompressed or RLE TGA, or a BLP with the same name and the path in `ns.EDIT_ICON` changed.
+
+**Delete a jornada.** The *Eliminar* button in the book's title bar removes the jornada being shown, after a confirmation that says how many entries and conversations it holds. The later jornadas move up a number (delete 7 and 8 becomes 7). The jornada in progress (the last one) cannot be deleted, and the demo diary has none. `ns.DeleteDay(n)` in `Edits.lua`. `/diario limpiar` removes all the empty ones at once.
+
+The phrase catalog (own phrases by class, race, mood and context) was built and then **removed on 2026-11-10** until it is better defined; the stored data it created (`AdventureJournalCatalog`) is no longer read.
+
 ### UI and commands
 
 - `AdventureJournalBookFrame` is Chema's book (T3; look and layout from his `1.1.0-Forever`, 820 x 560): a dark frame with the gold title "Diario de Aventura - <character>", the index of jornadas on the left (newest first; each row is a "Jornada N" button with "lugar · fecha" under it, the place being `mainZone` or the first entry's place), and on the right a page with `Textures/tiled.tga`: the jornada title, a date line, and the entries in `QuestFont`. An entry with a `header` (places) has it in red above its text; the first entry without one gets "En <lugar>". This line's additions, placed by decision D4 (to be reviewed by Chema): previous/next jornada and the page number in the title bar, left of the close button; the conversations toggle and its paging on the page's title row (only while the option is on); the time of each entry (and the mood, with `showProfile`) as a muted prefix of its text. It is created on first use.
@@ -248,7 +270,7 @@ AdventureJournal/
 - With no `_Mainline`/`_Standard` TOC and no plain `.toc`, retail does not load the addon.
 - With separate TOCs, each interface number can be bumped on its own when either client patches.
 - A single TOC with `## Interface: 16001, 11509` is an alternative, but Classic Era's support for multi-interface TOCs has not been checked on this machine. Use separate TOCs unless that is confirmed in game.
-- Both TOCs must declare `## SavedVariablesPerCharacter: AdventureJournalDB`. The Forever TOC adds `IconTexture`, `Category` and `AddonCompartmentFunc` (the function must be global; `AdventureJournal_OnAddonCompartmentClick` exists on both clients but only the Forever TOC names it). Both list `Options.lua` between `UI.lua` and `Commands.lua`.
+- Both TOCs must declare `## SavedVariablesPerCharacter: AdventureJournalDB` File order: `Edits.lua` after `Conversations.lua`. The Forever TOC adds `IconTexture`, `Category` and `AddonCompartmentFunc` (the function must be global; `AdventureJournal_OnAddonCompartmentClick` exists on both clients but only the Forever TOC names it). Both list `Options.lua` between `UI.lua` and `Commands.lua`.
 
 ### Coding rules for shared code
 

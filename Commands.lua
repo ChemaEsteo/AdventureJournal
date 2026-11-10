@@ -94,6 +94,15 @@ local function PrintDiagnostics()
     end
     Say("Panel de opciones: " .. ns.GetOptionsStatus())
     Say("Índice del libro: " .. ns.GetIndexMode())
+    do
+        local edited = 0
+        for _, day in pairs(ns.DB and ns.DB.days or {}) do
+            for _, entry in ipairs(type(day) == "table" and day.events or {}) do
+                if ns.EntryIsEdited(entry) then edited = edited + 1 end
+            end
+        end
+        Say("Anotaciones editadas por ti: " .. edited)
+    end
     local compartmentField = ns.GetAddonField("AddonCompartmentFunc")
     Say(string.format("Menú de addons (AddonCompartmentFunc): TOC = %s, función global = %s",
         compartmentField and tostring(compartmentField) or "no declarado o no legible",
@@ -415,6 +424,35 @@ local function OpenOptions()
     SetTypes("", "")
 end
 
+-- /diario limpiar [confirmar]: removes the jornadas in which nothing was recorded (no entries, no
+-- conversations; never the current one, never one made by the import). Without "confirmar" it only counts.
+-- The jornadas after a removed one move up a number, so back up the SavedVariables first.
+local function CleanEmptyDays(word)
+    local DB = ns.EnsureDatabase()
+    local total, keep, empty = DB.currentDay, {}, 0
+    for index = 1, total do
+        local day = DB.days[index]
+        local isEmpty = index < total and type(day) == "table" and day.source == nil
+            and (type(day.events) ~= "table" or #day.events == 0)
+            and (type(day.conversations) ~= "table" or #day.conversations == 0)
+        if isEmpty then empty = empty + 1 else keep[#keep + 1] = day end
+    end
+    if empty == 0 then
+        Say("No hay jornadas vacías que quitar.")
+        return
+    end
+    if word ~= "confirmar" then
+        Say(string.format("Hay %d jornadas vacías (sin anotaciones ni conversaciones). Las siguientes subirán de número. "
+            .. "Haz antes una copia de AdventureJournal.lua y escribe /diario limpiar confirmar.", empty))
+        return
+    end
+    DB.days = keep
+    DB.currentDay = #keep
+    ns.selectedDay = math.min(ns.selectedDay or DB.currentDay, DB.currentDay)
+    ns.RefreshIfVisible()
+    Say(string.format("Quitadas %d jornadas vacías. Ahora hay %d.", empty, DB.currentDay))
+end
+
 SLASH_ADVENTUREJOURNAL1 = "/diario"
 SLASH_ADVENTUREJOURNAL2 = "/journal"
 SlashCmdList["ADVENTUREJOURNAL"] = function(message)
@@ -437,6 +475,8 @@ SlashCmdList["ADVENTUREJOURNAL"] = function(message)
         SetChatMode(arg1)
     elseif (word == "opciones" or word == "options" or word == "config") and arg1 == "" then
         OpenOptions()
+    elseif (word == "limpiar" or word == "clean") and (arg1 == "" or arg1 == "confirmar") then
+        CleanEmptyDays(arg1)
     elseif word == "tipos" or word == "types" then
         SetTypes(arg1, arg2)
     elseif word == "animo" or word == "ánimo" or word == "mood" then
@@ -458,7 +498,7 @@ SlashCmdList["ADVENTUREJOURNAL"] = function(message)
             Say("Usa /diario importar (lee AJProbe y rellena el diario) o /diario importar prueba (solo cuenta, no guarda nada).")
         end
     else
-        Say("Usa /diario, /diario hoy, /diario anterior, /diario opciones, /diario perfil, /diario chat, /diario tipos, /diario botin, /diario enemigo, /diario animo, /diario conversaciones, /diario importar, /diario diag o /diario debug.")
+        Say("Usa /diario, /diario hoy, /diario anterior, /diario opciones, /diario limpiar, /diario perfil, /diario chat, /diario tipos, /diario botin, /diario enemigo, /diario animo, /diario conversaciones, /diario importar, /diario diag o /diario debug.")
     end
 end
 

@@ -89,7 +89,7 @@ if H.mode == "login" then
     ns.OpenAtDay(AdventureJournalDB.currentDay)
     local f = _G.AdventureJournalBookFrame
     ns.SetBookView("conversations")
-    note("off: asked for the conversations view: view button shown = " .. tostring(f.viewButton.shown)
+    note("off: asked for the conversations tab: it only says the log is off = " .. tostring(Has(BookBody(), "desactivado"))
         .. ", body contains conversation text = " .. tostring(Has(BookBody(), "secreto de rol") or Has(BookBody(), "Buenas")))
     ns.SetBookView("events")
     note("off: " .. ControlLine())
@@ -151,11 +151,11 @@ if H.mode == "login" then
 
     -- The book: both views, then pages.
     ns.OpenAtDay(AdventureJournalDB.currentDay)
-    note("on: view button shown = " .. tostring(f.viewButton.shown) .. ", reads '" .. tostring(f.viewButton.text) .. "'")
+    note("on: events tab active = " .. tostring(f.tabEvents.enabled == false) .. ", conversations tab clickable = " .. tostring(f.tabConversations.enabled))
     local eventsBody = BookBody()
     ns.SetBookView("conversations")
     local conversationsBody = BookBody()
-    note("conversations view: button reads '" .. tostring(f.viewButton.text) .. "'; " .. tostring(f.dayMeta.text))
+    note("conversations view: conversations tab active = " .. tostring(f.tabConversations.enabled == false) .. "; " .. tostring(f.dayMeta.text))
     note("body:\n" .. conversationsBody)
     assert(Has(conversationsBody, "Hola, ¿qué tal?") and not Has(conversationsBody, "Compro oro"), "wrong conversation text in the book")
     assert(not Has(eventsBody, "Hola, ¿qué tal?"), "conversation text in the events view")
@@ -169,8 +169,8 @@ if H.mode == "login" then
     f.conversationNext.scripts.OnClick(); f.conversationNext.scripts.OnClick(); f.conversationNext.scripts.OnClick()
     note("last page: " .. tostring(f.dayMeta.text) .. " [label " .. tostring(f.conversationPageText.text) .. "]"  .. " | next enabled = " .. tostring(f.conversationNext.enabled))
     ns.CONVERSATIONS_PER_PAGE = 100
-    f.viewButton.scripts.OnClick()
-    note("view button toggles back: " .. tostring(f.viewButton.text) .. "; body has conversations = " .. tostring(Has(BookBody(), "Hola, ¿qué tal?")))
+    f.tabEvents.scripts.OnClick()
+    note("events tab goes back: events tab active = " .. tostring(f.tabEvents.enabled == false) .. "; body has conversations = " .. tostring(Has(BookBody(), "Hola, ¿qué tal?")))
 
     -- The per-day limit: capture stops for the jornada, one notice.
     local normalMax = ns.MAX_CONVERSATIONS_PER_DAY
@@ -187,8 +187,8 @@ if H.mode == "login" then
     advance(5); Chat("CHAT_MSG_WHISPER", "Con la opción apagada", "Amigo-ZandalarTribe", "", "Player-1-AMIGO")
     Chat("CHAT_MSG_SAY", "Apagado", "Volgajin-ZandalarTribe", "Orco", S.guid)
     assert(Lines() == stored, "captured while off")
-    note(string.format("off again: %d lines stored (unchanged), book view = %s, body shows conversation text = %s, view button shown = %s",
-        Lines(), tostring(ns.bookView), tostring(Has(BookBody(), "Hola, ¿qué tal?")), tostring(f.viewButton.shown)))
+    note(string.format("off again: %d lines stored (unchanged), book view = %s, body shows conversation text = %s, events tab active = %s",
+        Lines(), tostring(ns.bookView), tostring(Has(BookBody(), "Hola, ¿qué tal?")), tostring(f.tabEvents.enabled == false)))
     slash("conversaciones")
     slash("conversaciones quizá")
 

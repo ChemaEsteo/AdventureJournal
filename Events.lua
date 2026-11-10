@@ -91,6 +91,23 @@ local function StartSession(isReloadingUi)
         return
     end
 
+    -- A jornada in which nothing happened is not kept: if the last one is still empty (no entries and
+    -- no conversations; one made by the import or already ended with content never is), this login
+    -- reuses it instead of adding another empty one.
+    local last = DB.days[DB.currentDay]
+    if DB.currentDay >= 1 and type(last) == "table" and last.source == nil
+        and (type(last.events) ~= "table" or #last.events == 0)
+        and (type(last.conversations) ~= "table" or #last.conversations == 0) then
+        last.startedAt = date("%Y-%m-%d %H:%M:%S")
+        last.dateLabel = date("%d/%m/%Y")
+        last.endedAt = nil
+        last.events = last.events or {}
+        ns.selectedDay = DB.currentDay
+        currentPlace = ns.GetPlace()
+        print(string.format("|cFFFFD700[Diario]|r Comienza la jornada %d. Tu historia continúa.", DB.currentDay))
+        return
+    end
+
     DB.currentDay = DB.currentDay + 1
     local n = DB.currentDay
     DB.days[n] = {

@@ -12,6 +12,7 @@ Database.lua
 Narrative.lua
 Events.lua
 Conversations.lua
+Edits.lua
 Import.lua
 UI.lua
 Options.lua

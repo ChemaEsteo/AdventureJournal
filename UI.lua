@@ -14,14 +14,16 @@ local addonName, ns = ...
 local journalFrame
 ns.selectedDay = 1
 
--- M4b: the book shows either the events of a jornada or its conversations. The conversations
--- view exists only while the option is on (ConversationsEnabled); with it off the book is the
--- events view whatever was left selected, and no conversation text is ever put on screen.
+-- M4b: the book shows either the events of a jornada or its conversations, as two tabs on the page.
+-- The conversations tab is always there; while the option is off it only says so, and no conversation
+-- text is ever put on screen (what was stored stays in the file).
+-- Each event paragraph has a pencil icon that opens the edit window (Edits.lua): the player can rewrite
+-- the sentence and add a description. The demo diary is read-only, so it has no icons.
 ns.bookView = "events"        -- "events" | "conversations"
 ns.conversationPage = 1
 
 local function CurrentView()
-    if ns.bookView == "conversations" and ns.ConversationsEnabled() then return "conversations" end
+    if ns.bookView == "conversations" then return "conversations" end
     return "events"
 end
 
@@ -294,6 +296,11 @@ local function BuildUI()
     previous:SetPoint("RIGHT", pageNumber, "LEFT", -6, 0)
     f.prevButton = previous
 
+    -- Delete the jornada being shown (Edits.lua asks first). Left of the previous / next buttons.
+    local deleteButton = CreateBookButton(f, "Eliminar", 84, 24, function() ns.AskDeleteDay(ns.selectedDay) end)
+    deleteButton:SetPoint("TOPLEFT", f, "TOPLEFT", 436, -11)
+    f.deleteButton = deleteButton
+
     -- Left panel: the index of jornadas.
     local leftPanel = CreatePanel(f, 240, 495)
     leftPanel:SetPoint("TOPLEFT", f, "TOPLEFT", 15, -45)
@@ -325,16 +332,16 @@ local function BuildUI()
     SetColor(dayMeta, FONT_COLOR.metadata)
     f.dayMeta = dayMeta
 
-    -- M4b: events <-> conversations, and the pages of a long conversation list, on the title row.
-    -- Shown only while the conversations option is on (RefreshUI).
-    local viewButton = CreateBookButton(rightPage, "Conversaciones", 100, 22, function()
-        ns.SetBookView(CurrentView() == "conversations" and "events" or "conversations")
-    end)
-    viewButton:SetPoint("TOPRIGHT", rightPage, "TOPRIGHT", -14, -14)
-    viewButton:Hide()
-    f.viewButton = viewButton
+    -- Tabs: the events of the jornada, or its conversations. The active tab is the disabled one.
+    local tabConversations = CreateBookButton(rightPage, "Conversaciones", 104, 22, function() ns.SetBookView("conversations") end)
+    tabConversations:SetPoint("TOPRIGHT", rightPage, "TOPRIGHT", -14, -14)
+    f.tabConversations = tabConversations
+    local tabEvents = CreateBookButton(rightPage, "Acontecimientos", 112, 22, function() ns.SetBookView("events") end)
+    tabEvents:SetPoint("RIGHT", tabConversations, "LEFT", -4, 0)
+    f.tabEvents = tabEvents
+    -- The pages of a long conversation list, under the tabs.
     local conversationNext = CreateBookButton(rightPage, "Después >", 62, 22, function() ns.SetConversationPage(ns.conversationPage + 1) end)
-    conversationNext:SetPoint("RIGHT", viewButton, "LEFT", -4, 0)
+    conversationNext:SetPoint("TOPRIGHT", rightPage, "TOPRIGHT", -14, -40)
     conversationNext:Hide()
     f.conversationNext = conversationNext
     local conversationPageText = CreateText(rightPage, "GameFontHighlightSmall", "", 36)
@@ -350,19 +357,18 @@ local function BuildUI()
 
     -- The entries.
     local contentScroll = CreateFrame("ScrollFrame", nil, rightPage, "UIPanelScrollFrameTemplate")
-    contentScroll:SetPoint("TOPLEFT", rightPage, "TOPLEFT", 20, -55)
+    contentScroll:SetPoint("TOPLEFT", rightPage, "TOPLEFT", 20, -68)
     contentScroll:SetPoint("BOTTOMRIGHT", rightPage, "BOTTOMRIGHT", -28, 15)
     local contentChild = CreateFrame("Frame", nil, contentScroll)
     contentChild:SetSize(470, 1)
     contentScroll:SetScrollChild(contentChild)
+    -- `body` is the plain text of the page (every paragraph, separated by a blank line). It is not shown:
+    -- the paragraphs are drawn one by one (ShowParagraphs) so each can have its edit icon. It is kept as
+    -- the page's text for the test harness and diagnostics.
     local body = CreateText(contentChild, "QuestFont", "", 450)
-    body:SetPoint("TOPLEFT", contentChild, "TOPLEFT", 10, -10)
-    body:SetPoint("TOPRIGHT", contentChild, "TOPRIGHT", -10, -10)
-    SetColor(body, FONT_COLOR.body)
-    if body.SetShadowColor then body:SetShadowColor(0, 0, 0, 0.3) end
-    if body.SetShadowOffset then body:SetShadowOffset(1, -1) end
-    if body.SetSpacing then body:SetSpacing(4) end
+    body:Hide()
     f.contentChild, f.contentScroll, f.body = contentChild, contentScroll, body
+    f.rows = {}
 
     f:SetScript("OnShow", function() ns.RefreshUI() end)
 
@@ -401,12 +407,32 @@ end
 -- One entry as Chema writes it: a red header for entries that have one (places), "En <lugar>" on a
 -- first entry without one, no header otherwise. The time (and the mood with showProfile) is a muted
 -- prefix of the text: his design has none, this line keeps them (decision D4).
+-- The first error of each kind goes to the game's error handler (visible with /console scriptErrors 1);
+-- the page is drawn anyway, so one bad entry or a failing icon never blanks the book.
+local reported = {}
+local function ReportOnce(kind, err)
+    ns.Debug("libro: %s: %s", kind, tostring(err))
+    if reported[kind] and kind ~= "ventana de edición" then return end
+    reported[kind] = true
+    -- Also in the chat, so it can be read without /console scriptErrors 1.
+    print("|cFFFF6060[Diario]|r error en el libro (" .. kind .. "): " .. tostring(err))
+    local handler = geterrorhandler and geterrorhandler()
+    if handler then handler("AdventureJournal: error en el libro (" .. kind .. "): " .. tostring(err)) end
+end
+
+local NOTE_COLOR = "|cFF2A3F6B"        -- the description the player added under a sentence
+
 local function EntryParagraph(day, index, entry, showProfile)
     local prose, header = entry.prose, entry.header
     if type(prose) ~= "string" or prose == "" then
         local composed, composedHeader = ns.ComposeEntry(entry)
         prose, header = composed, header or composedHeader
     end
+    -- The player's own wording (Edits.lua) replaces the sentence; the generated one stays in the entry.
+    local userText = type(entry.userText) == "string" and entry.userText ~= "" and entry.userText or nil
+    local userNote = type(entry.userNote) == "string" and entry.userNote ~= "" and entry.userNote or nil
+    if userText then prose = ns.EscapeUserText(userText) end
+    if userNote then prose = prose .. "\n" .. NOTE_COLOR .. ns.EscapeUserText(userNote) .. "|r" end
     if type(header) ~= "string" or header == "" then header = nil end
     if index == 1 and not header then
         local place = type(entry.place) == "string" and entry.place ~= "" and entry.place
@@ -422,7 +448,133 @@ local function EntryParagraph(day, index, entry, showProfile)
     return prose
 end
 
-function ns.RefreshUI()
+-- Paragraphs ---------------------------------------------------------------------------------------
+-- One FontString per paragraph, chained one under the other, so the game does the layout and each paragraph
+-- can have an edit icon. Rows are created on demand and reused (a jornada with 40 entries makes 40 rows once).
+local ROW_TEXT_X, ROW_WIDTH, ROW_GAP, ICON_SIZE = 36, 418, 16, 16
+
+local function GetRow(f, index)
+    local row = f.rows[index]
+    if row then return row end
+    local fs = CreateText(f.contentChild, "QuestFont", "", ROW_WIDTH)
+    SetColor(fs, FONT_COLOR.body)
+    if fs.SetShadowColor then fs:SetShadowColor(0, 0, 0, 0.3) end
+    if fs.SetShadowOffset then fs:SetShadowOffset(1, -1) end
+    if fs.SetSpacing then fs:SetSpacing(4) end
+    row = { fs = fs }
+    f.rows[index] = row
+    return row
+end
+
+-- The pencil icon is created the first time a row needs it. Its picture is Textures\edit.tga (ns.EDIT_ICON).
+local function GetEditButton(f, row)
+    if row.button then return row.button end
+    local button = CreateFrame("Button", nil, f.contentChild)
+    button:SetSize(ICON_SIZE, ICON_SIZE)
+    -- Above the paragraph text, so nothing hides it.
+    if button.SetFrameLevel and f.contentChild.GetFrameLevel then button:SetFrameLevel(f.contentChild:GetFrameLevel() + 5) end
+    local icon = button:CreateTexture(nil, "OVERLAY")
+    icon:SetAllPoints(button)
+    icon:SetTexture(ns.EDIT_ICON)
+    button.icon = icon
+    -- A second, additive copy of the picture lights the icon under the mouse. Not essential.
+    local ok, err = pcall(function()
+        local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+        highlight:SetAllPoints(button)
+        highlight:SetTexture(ns.EDIT_ICON)
+        highlight:SetBlendMode("ADD")
+    end)
+    if not ok then ns.Debug("libro: sin resalte en el icono: %s", tostring(err)) end
+    button:SetScript("OnClick", function(self)
+        local target = self.target
+        if not target then return end
+        local ok, result = pcall(ns.OpenEditDialog, target.day, target.index)
+        if not ok then ReportOnce("ventana de edición", result)
+        elseif not result then print("|cFFFF6060[Diario]|r no he encontrado esa anotación para editarla.") end
+    end)
+    button:SetScript("OnEnter", function(self)
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(self.edited and "Editar (ya tiene cambios tuyos)" or "Editar esta anotación")
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+    row.button = button
+    return button
+end
+
+-- Draws the paragraphs. targets[i] = { day = n, index = m } gives paragraph i an edit icon; a paragraph with
+-- no target (conversations, messages, the demo diary) has none. Sets the scroll height.
+local function ShowParagraphs(f, paragraphs, targets)
+    local total, previous = 10, nil
+    for i, text in ipairs(paragraphs) do
+        local row = GetRow(f, i)
+        local fs = row.fs
+        fs:ClearAllPoints()
+        if previous then
+            fs:SetPoint("TOPLEFT", previous, "BOTTOMLEFT", 0, -ROW_GAP)
+            total = total + ROW_GAP
+        else
+            fs:SetPoint("TOPLEFT", f.contentChild, "TOPLEFT", ROW_TEXT_X, -10)
+        end
+        fs:SetText(text)
+        fs:Show()
+        total = total + (fs:GetStringHeight() or 0)
+        previous = fs
+        local target = targets and targets[i]
+        if target then
+            local ok, err = pcall(function()
+                local button = GetEditButton(f, row)
+                button.target = target
+                button.edited = target.edited == true
+                button:SetAlpha(button.edited and 1 or 0.55)
+                button:ClearAllPoints()
+                button:SetPoint("TOPRIGHT", fs, "TOPLEFT", -6, -2)
+                button:Show()
+            end)
+            if not ok then ReportOnce("icono de edición", err) end
+        elseif row.button then
+            row.button.target = nil
+            row.button:Hide()
+        end
+    end
+    for i = #paragraphs + 1, #f.rows do
+        local row = f.rows[i]
+        row.fs:SetText("")
+        row.fs:Hide()
+        if row.button then row.button.target = nil; row.button:Hide() end
+    end
+    f.body:SetText(table.concat(paragraphs, "\n\n"))
+    f.contentChild:SetHeight(math.max(100, total + 14))
+    -- After an edit the page stays where it was; any other refresh starts at the top.
+    local keep = f.keepScroll
+    f.keepScroll = nil
+    f.contentScroll:SetVerticalScroll(keep or 0)
+end
+
+-- Sets which tab looks active (the disabled one) and shows the conversation paging only where it belongs.
+local function ShowTabs(f, view, pages)
+    if view == "conversations" then
+        f.tabConversations:Disable()
+        f.tabEvents:Enable()
+    else
+        f.tabEvents:Disable()
+        f.tabConversations:Enable()
+    end
+    if view == "conversations" and ns.ConversationsEnabled() and pages > 1 then
+        f.conversationPrev:Show()
+        f.conversationNext:Show()
+        f.conversationPageText:Show()
+        if ns.conversationPage <= 1 then f.conversationPrev:Disable() else f.conversationPrev:Enable() end
+        if ns.conversationPage >= pages then f.conversationNext:Disable() else f.conversationNext:Enable() end
+    else
+        f.conversationPrev:Hide()
+        f.conversationNext:Hide()
+        f.conversationPageText:Hide()
+    end
+end
+
+local function RefreshUIInner()
     if not journalFrame then return end
     local DB = ViewDB()
     local total = DB.currentDay or 0
@@ -431,66 +583,77 @@ function ns.RefreshUI()
     if total < 1 then
         journalFrame.dayTitle:SetText("Aún no hay jornadas")
         journalFrame.dayMeta:SetText("")
-        journalFrame.body:SetText("Tu historia comienza cuando salgas a explorar.")
-        journalFrame.contentChild:SetHeight(150)
+        ShowParagraphs(journalFrame, { "Tu historia comienza cuando salgas a explorar." })
+        ShowTabs(journalFrame, "events", 1)
         journalFrame.pageNumber:SetText("Sin páginas")
         journalFrame.prevButton:Disable()
         journalFrame.nextButton:Disable()
+        journalFrame.deleteButton:Disable()
         return
     end
 
     ns.selectedDay = math.max(1, math.min(total, ns.selectedDay))
     local day = DB.days[ns.selectedDay] or { events = {} }
     local events = day.events or {}
+    local demoNote = ns.demoDB and "     ·     DATOS DE PRUEBA (no se guardan)" or ""
     journalFrame.dayTitle:SetText(string.format("Jornada %d", ns.selectedDay))
-    journalFrame.dayMeta:SetText(string.format("%s     ·     %d acontecimientos%s", day.dateLabel or "Fecha desconocida", #events,
-        ns.demoDB and "     ·     DATOS DE PRUEBA (no se guardan)" or ""))
+    journalFrame.dayMeta:SetText(string.format("%s     ·     %d acontecimientos%s", day.dateLabel or "Fecha desconocida", #events, demoNote))
 
     local view = CurrentView()
-    local paragraphs = {}
+    local paragraphs, targets = {}, {}
     local pages = 1
     if view == "conversations" then
-        local page
-        paragraphs, pages, page = ns.ConversationParagraphs(day, ns.conversationPage)
-        ns.conversationPage = page
         journalFrame.dayMeta:SetText(string.format("%s     ·     %d conversaciones%s", day.dateLabel or "Fecha desconocida",
-            ns.CountConversations(day), ns.demoDB and "     ·     DATOS DE PRUEBA (no se guardan)" or ""))
-        journalFrame.conversationPageText:SetText(string.format("%d / %d", page, pages))
-        if #paragraphs == 0 then
-            paragraphs[1] = "No hay conversaciones guardadas en esta jornada."
+            ns.CountConversations(day), demoNote))
+        if ns.ConversationsEnabled() then
+            local page
+            paragraphs, pages, page = ns.ConversationParagraphs(day, ns.conversationPage)
+            ns.conversationPage = page
+            journalFrame.conversationPageText:SetText(string.format("%d / %d", page, pages))
+            if #paragraphs == 0 then
+                paragraphs[1] = "No hay conversaciones guardadas en esta jornada."
+            end
+        else
+            -- Nothing stored is shown while the option is off (what was saved stays in the file).
+            paragraphs[1] = "El registro de conversaciones está desactivado. Actívalo con /diario conversaciones on "
+                .. "o en Esc > Opciones > AddOns > Diario de Aventuras. Son palabras de otros jugadores, por eso no se guardan sin tu permiso."
         end
     elseif #events == 0 then
         paragraphs[1] = "No dejé constancia de grandes gestas durante esta jornada. Quizá fue un día de descanso, preparativos o caminos tranquilos. Incluso las pausas forman parte de una aventura."
     else
         local showProfile = ns.GetSetting("showProfile") == true
         for index, entry in ipairs(events) do
-            table.insert(paragraphs, EntryParagraph(day, index, entry, showProfile))
+            local ok, text = pcall(EntryParagraph, day, index, entry, showProfile)
+            if not ok then
+                ReportOnce("anotación " .. index, text)
+                text = "(No he podido mostrar esta anotación.)"
+            end
+            table.insert(paragraphs, text)
+            -- The demo diary only exists in memory: it cannot be edited.
+            if not ns.demoDB then
+                targets[#paragraphs] = { day = ns.selectedDay, index = index, edited = ns.EntryIsEdited and ns.EntryIsEdited(entry) or false }
+            end
         end
     end
-    -- The conversations view and its buttons exist only while the option is on.
-    if ns.ConversationsEnabled() then
-        journalFrame.viewButton:Show()
-        journalFrame.viewButton:SetText(view == "conversations" and "Acontecimientos" or "Conversaciones")
-    else
-        journalFrame.viewButton:Hide()
-    end
-    if view == "conversations" and pages > 1 then
-        journalFrame.conversationPrev:Show()
-        journalFrame.conversationNext:Show()
-        journalFrame.conversationPageText:Show()
-        if ns.conversationPage <= 1 then journalFrame.conversationPrev:Disable() else journalFrame.conversationPrev:Enable() end
-        if ns.conversationPage >= pages then journalFrame.conversationNext:Disable() else journalFrame.conversationNext:Enable() end
-    else
-        journalFrame.conversationPrev:Hide()
-        journalFrame.conversationNext:Hide()
-        journalFrame.conversationPageText:Hide()
-    end
-    journalFrame.body:SetText(table.concat(paragraphs, "\n\n"))
-    journalFrame.contentChild:SetHeight(math.max(100, journalFrame.body:GetStringHeight() + 20))
-    journalFrame.contentScroll:SetVerticalScroll(0)
+    ShowParagraphs(journalFrame, paragraphs, targets)
+    ShowTabs(journalFrame, view, pages)
     journalFrame.pageNumber:SetText(string.format("%d / %d", ns.selectedDay, total))
+    -- Not the jornada in progress (the last one), and not the demo diary.
+    if ns.demoDB or ns.selectedDay >= total then journalFrame.deleteButton:Disable() else journalFrame.deleteButton:Enable() end
     if ns.selectedDay <= 1 then journalFrame.prevButton:Disable() else journalFrame.prevButton:Enable() end
     if ns.selectedDay >= total then journalFrame.nextButton:Disable() else journalFrame.nextButton:Enable() end
+end
+
+function ns.RefreshUI()
+    local ok, err = pcall(RefreshUIInner)
+    if not ok then ReportOnce("RefreshUI", ns.StripPosition and ns.StripPosition(err) or err) end
+end
+
+-- Refreshes the page without jumping back to the top (used after an edit).
+function ns.RefreshKeepingScroll()
+    if not journalFrame then return end
+    journalFrame.keepScroll = journalFrame.contentScroll:GetVerticalScroll()
+    ns.RefreshIfVisible()
 end
 
 function ns.RefreshIfVisible()

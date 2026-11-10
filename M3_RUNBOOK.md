@@ -144,3 +144,14 @@ Close the game first: WoW writes SavedVariables on `/reload` or logout.
 - Whether `/reload` continued the jornada (it should) and a real login started a new one.
 
 Open questions this session answers (all "verify in M3" in the README and ROADMAP): the `PLAYER_ENTERING_WORLD` flags (reload vs login), whether the own-loot patterns match Forever's loot messages (`toolsjprobe_summary.py` counts them), which payloads are really secret in a dungeon, whether `ENCOUNTER_END` / `BOSS_KILL` arguments are secret, which item-cache event fires (`GET_ITEM_INFO_RECEIVED` or `ITEM_DATA_LOAD_RESULT`), what Forever's item links look like, whether zone text is ever secret, whether `C_QuestLog.GetTitleForQuestID` returns titles at `QUEST_TURNED_IN`, and (M4b) whether chat is secret in instances, whether `C_FriendList.IsFriend` / `C_BattleNet.GetGameAccountInfoByGUID` identify friends by GUID, whether `time{...}` converts dates back, and whether `ENCOUNTER_END`'s `success` is the number 1 or a boolean.
+
+## 3e. Pestañas, lápiz y eliminar jornada (M9)
+
+Antes: copia `AdventureJournal.lua` (WTF\...\SavedVariables) y la carpeta del addon. Activa `/console scriptErrors 1`.
+
+1. `/reload`, `/diario diag`: debe salir «Anotaciones editadas por ti: 0» y ningún error de carga (si falla, copia el texto exacto).
+2. `/diario`: el libro abre con las pestañas «Acontecimientos» y «Conversaciones» arriba a la derecha. Cada párrafo tiene un lápiz a la izquierda. Anota si se ve el icono, si se solapa con el texto o si el texto se corta.
+3. Pulsa un lápiz: se abre la ventana con la frase. Cámbiala, añade una descripción, Guardar. El párrafo cambia y la página no salta arriba. `/reload`: sigue ahí. «Volver al original» (dos clics) la restaura.
+4. Pestaña «Conversaciones»: con el registro activo se ven las líneas y la paginación; con `/diario conversaciones off` solo sale el aviso.
+5. Botón «Eliminar» (barra del libro): en una jornada que no sea la última, pide confirmación y, al aceptar, desaparece y las siguientes suben de número. En la última, avisa de que no se puede.
+6. Envía de vuelta: capturas del libro y de la ventana de edición, y cualquier error Lua.

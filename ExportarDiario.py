@@ -124,7 +124,12 @@ def export_text(db):
             lines.append('No quedaron acontecimientos registrados durante esta jornada.')
         else:
             for entry in event_values:
-                lines.append(f"[{clean(entry.get('time', ''))}] {clean(entry.get('prose') or entry.get('text', ''))}")
+                # La versión propia del jugador (userText) sustituye a la frase generada; la descripción
+                # añadida (userNote) va debajo.
+                sentence = entry.get('userText') or entry.get('prose') or entry.get('text', '')
+                lines.append(f"[{clean(entry.get('time', ''))}] {clean(sentence)}")
+                if entry.get('userNote'):
+                    lines.append(f"    {clean(entry.get('userNote'))}")
                 lines.append('')
         lines.append('')
     return '\n'.join(lines).rstrip() + '\n'
