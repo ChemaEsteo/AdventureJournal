@@ -372,6 +372,9 @@ local function BuildUI()
 
     f:SetScript("OnShow", function() ns.RefreshUI() end)
 
+    -- Side tabs on the right edge (the diary itself first; other addons add theirs). See the end of this file.
+    if ns.BuildSideTabs then ns.BuildSideTabs(f) end
+
     -- Escape closes the book (bug #7).
     local alreadyRegistered = false
     for _, name in ipairs(UISpecialFrames) do
@@ -671,3 +674,172 @@ function ns.OpenAtDay(dayNumber)
     ns.SelectDay(dayNumber)
     journalFrame:Show()
 end
+
+-- ---------------------------------------------------------------------------------------------------
+-- Side tabs.
+-- The right edge of the book holds a stack of side tabs, styled like the tabs of the character window.
+-- The first one is the diary itself and is always there. Other addons add their own tab to the stack
+-- (so they share the space instead of each one placing a button on its own):
+--
+--   local index = AdventureJournalTabs.Add({
+--       icon       = "Interface\Icons\Trade_Fishing",
+--       tooltip    = "My tab",
+--       onSelect   = function() ... end,   -- show your content (a child frame of the book is fine)
+--       onDeselect = function() ... end,   -- hide it
+--   })
+--   AdventureJournalTabs.Select(index)     -- select a tab (1 = the diary)
+--
+-- A tab added before the book window exists is queued and created when the window is built.
+-- ---------------------------------------------------------------------------------------------------
+local sideTabs, queuedTabs = {}, {}
+
+-- Same look as the character window's side tabs when they can be read; a plain icon button otherwise.
+local function CreateSideTab(parent, iconPath)
+    local src = _G.CharacterFrameModeTab6
+    local btn
+    if src and src.GetRegions then
+        pcall(function()
+            btn = CreateFrame("Button", nil, parent)
+            btn:SetSize(src:GetSize())
+            btn.selTex, btn.hoverTex = {}, {}
+            local map, icon, mask = {}, nil, nil
+            for _, r in ipairs({ src:GetRegions() }) do
+                local isMask = r:GetObjectType() == "MaskTexture"
+                local nr
+                if isMask then
+                    nr = btn:CreateMaskTexture()
+                else
+                    local layer, sub = r:GetDrawLayer()
+                    nr = btn:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
+                end
+                map[r] = nr
+                local atlas = r.GetAtlas and r:GetAtlas()
+                if atlas then
+                    nr:SetAtlas(atlas, false)
+                elseif not isMask then
+                    nr:SetTexture(iconPath)
+                else
+                    local tex = r:GetTexture()
+                    if tex then nr:SetTexture(tex) end
+                end
+                if not isMask then pcall(function() nr:SetTexCoord(r:GetTexCoord()) end) end
+                if r:GetNumPoints() == 0 then
+                    nr:SetAllPoints(btn)
+                else
+                    for i = 1, r:GetNumPoints() do
+                        local p, rel, rp, x, y = r:GetPoint(i)
+                        local target = (rel == nil or rel == src) and btn or map[rel] or btn
+                        nr:SetPoint(p, target, rp, x or 0, y or 0)
+                    end
+                end
+                local w, h = r:GetSize()
+                if w and w > 0 and h and h > 0 then nr:SetSize(w, h) end
+                if not isMask then
+                    pcall(function() nr:SetBlendMode(r:GetBlendMode()) end)
+                    pcall(function() nr:SetVertexColor(r:GetVertexColor()) end)
+                    nr:SetAlpha(r:GetAlpha())
+                end
+                nr:SetShown(r:IsShown())
+                if isMask then mask = nr
+                elseif atlas and atlas:find("selected") then btn.selTex[#btn.selTex + 1] = nr; nr:Hide()
+                elseif atlas and atlas:find("hover") then btn.hoverTex[#btn.hoverTex + 1] = nr; nr:Hide()
+                elseif not atlas then icon = nr end
+            end
+            if icon then
+                -- The source tab only sizes its icon and mask once the character window has been shown,
+                -- so never rely on the copied geometry: centre the icon and make the mask follow it.
+                icon:ClearAllPoints()
+                icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+                local s = math.min(btn:GetWidth(), btn:GetHeight()) * 0.58
+                icon:SetSize(s, s)
+                icon:SetTexCoord(0, 1, 0, 1)
+                icon:Show()
+                if mask then
+                    mask:ClearAllPoints()
+                    mask:SetAllPoints(icon)
+                    icon:AddMaskTexture(mask)
+                end
+            end
+        end)
+    end
+    if not btn or not btn.selTex then
+        btn = CreateFrame("Button", nil, parent)
+        btn:SetSize(48, 48)
+        local back = btn:CreateTexture(nil, "BACKGROUND")
+        back:SetAllPoints(); back:SetColorTexture(0.08, 0.06, 0.04, 0.95)
+        local ic = btn:CreateTexture(nil, "ARTWORK")
+        ic:SetPoint("TOPLEFT", 6, -6); ic:SetPoint("BOTTOMRIGHT", -6, 6); ic:SetTexture(iconPath)
+        local sel = btn:CreateTexture(nil, "OVERLAY")
+        sel:SetAllPoints(); sel:SetColorTexture(1, 0.82, 0, 0.3); sel:Hide()
+        local hov = btn:CreateTexture(nil, "OVERLAY")
+        hov:SetAllPoints(); hov:SetColorTexture(1, 1, 1, 0.15); hov:Hide()
+        btn.selTex, btn.hoverTex = { sel }, { hov }
+    end
+    btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    function btn:SetSelected(on)
+        for _, t in ipairs(self.selTex) do t:SetShown(on) end
+    end
+    return btn
+end
+
+local function SelectSideTab(index)
+    for i, t in ipairs(sideTabs) do
+        if i == index then
+            t.btn:SetSelected(true)
+            if i > 1 and not t.selected and t.spec.onSelect then pcall(t.spec.onSelect) end
+            t.selected = true
+        else
+            t.btn:SetSelected(false)
+            if t.selected and t.spec.onDeselect then pcall(t.spec.onDeselect) end
+            t.selected = false
+        end
+    end
+end
+
+local function CreateTabNow(spec)
+    local parent = journalFrame
+    local btn = CreateSideTab(parent, spec.icon or "Interface\Icons\INV_Misc_Book_09")
+    local index = #sideTabs + 1
+    if index == 1 then
+        btn:SetPoint("TOPLEFT", parent, "TOPRIGHT", -4, -50)
+    else
+        btn:SetPoint("TOPLEFT", sideTabs[index - 1].btn, "BOTTOMLEFT", 0, -2)
+    end
+    btn:SetScript("OnMouseUp", function(_, _, upInside)
+        if upInside ~= false then SelectSideTab(index) end
+    end)
+    btn:SetScript("OnEnter", function(self)
+        for _, t in ipairs(self.hoverTex) do t:Show() end
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:SetText(spec.tooltip or "")
+        GameTooltip:Show()
+    end)
+    btn:SetScript("OnLeave", function(self)
+        for _, t in ipairs(self.hoverTex) do t:Hide() end
+        GameTooltip:Hide()
+    end)
+    sideTabs[index] = { btn = btn, spec = spec, selected = false }
+    return index
+end
+
+function ns.BuildSideTabs(f)
+    if sideTabs[1] then return end
+    -- 1: the diary itself. Selecting it deselects every other tab, which hides their content.
+    CreateTabNow({ icon = "Interface\Icons\INV_Misc_Book_09", tooltip = "Diario de Aventuras" })
+    SelectSideTab(1)
+    for _, spec in ipairs(queuedTabs) do spec.index = CreateTabNow(spec) end
+    wipe(queuedTabs)
+    -- Closing the book returns to the diary, so the next opening does not show another addon's content.
+    f:HookScript("OnHide", function() SelectSideTab(1) end)
+end
+
+AdventureJournalTabs = {
+    -- Returns the tab's index. Queued (and the index predicted) when the book window does not exist yet.
+    Add = function(spec)
+        if type(spec) ~= "table" then return nil end
+        if journalFrame and sideTabs[1] then return CreateTabNow(spec) end
+        queuedTabs[#queuedTabs + 1] = spec
+        return 1 + #queuedTabs
+    end,
+    Select = function(index) if sideTabs[1] then SelectSideTab(index or 1) end end,
+}
