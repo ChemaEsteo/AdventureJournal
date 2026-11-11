@@ -682,7 +682,7 @@ end
 -- (so they share the space instead of each one placing a button on its own):
 --
 --   local index = AdventureJournalTabs.Add({
---       icon       = "Interface\Icons\Trade_Fishing",
+--       icon       = "Interface\\Icons\\Trade_Fishing",
 --       tooltip    = "My tab",
 --       onSelect   = function() ... end,   -- show your content (a child frame of the book is fine)
 --       onDeselect = function() ... end,   -- hide it
@@ -695,87 +695,80 @@ local sideTabs, queuedTabs = {}, {}
 
 -- Same look as the character window's side tabs when they can be read; a plain icon button otherwise.
 local function CreateSideTab(parent, iconPath)
+    local btn = CreateFrame("Button", nil, parent)
+    btn:SetSize(63, 63)
+    btn.selTex, btn.hoverTex = {}, {}
+
+    -- The icon goes first, in a child frame above the tab art, so nothing that fails or covers below
+    -- can leave the tab without it.
+    local holder = CreateFrame("Frame", nil, btn)
+    holder:SetAllPoints(btn)
+    holder:EnableMouse(false)
+    local own = holder:CreateTexture(nil, "OVERLAY", nil, 7)
+    own:SetPoint("CENTER", holder, "CENTER", 0, 0)
+    own:SetSize(34, 34)
+    own:SetTexture(iconPath)
+    btn.ownPath = tostring(iconPath)
+    if not own:GetTexture() and type(iconPath) == "string" then
+        own:SetTexture((iconPath:gsub("\\", "/"))) -- same path with forward slashes
+    end
+    btn.ownApplied = own:GetTexture() ~= nil
+    own:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    btn.ownIcon, btn.iconHolder = own, holder
+
+    -- Tab art: copy the textures of the character window's side tab (each one on its own, so a
+    -- failure in one does not stop the rest). Falls back to a plain dark square.
+    local copied = 0
     local src = _G.CharacterFrameModeTab6
-    local btn
     if src and src.GetRegions then
-        pcall(function()
-            btn = CreateFrame("Button", nil, parent)
-            btn:SetSize(src:GetSize())
-            btn.selTex, btn.hoverTex = {}, {}
-            local map, icon, mask = {}, nil, nil
-            for _, r in ipairs({ src:GetRegions() }) do
-                local isMask = r:GetObjectType() == "MaskTexture"
-                local nr
-                if isMask then
-                    nr = btn:CreateMaskTexture()
-                else
-                    local layer, sub = r:GetDrawLayer()
-                    nr = btn:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
-                end
+        local w, h = src:GetSize()
+        if w and w > 1 and h and h > 1 then btn:SetSize(w, h) end
+        local map = {}
+        for _, r in ipairs({ src:GetRegions() }) do
+            local ok = pcall(function()
+                if r:GetObjectType() == "MaskTexture" then return end -- the icon is drawn square, no mask needed
+                local layer, sub = r:GetDrawLayer()
+                local nr = btn:CreateTexture(nil, layer or "ARTWORK", nil, sub or 0)
                 map[r] = nr
                 local atlas = r.GetAtlas and r:GetAtlas()
-                if atlas then
-                    nr:SetAtlas(atlas, false)
-                elseif not isMask then
-                    nr:SetTexture(iconPath)
-                else
-                    local tex = r:GetTexture()
-                    if tex then nr:SetTexture(tex) end
-                end
-                if not isMask then pcall(function() nr:SetTexCoord(r:GetTexCoord()) end) end
+                if not atlas then nr:Hide() return end -- the source's own icon: not used
+                nr:SetAtlas(atlas, false)
+                pcall(function() nr:SetTexCoord(r:GetTexCoord()) end)
                 if r:GetNumPoints() == 0 then
                     nr:SetAllPoints(btn)
                 else
                     for i = 1, r:GetNumPoints() do
                         local p, rel, rp, x, y = r:GetPoint(i)
                         local target = (rel == nil or rel == src) and btn or map[rel] or btn
-                        nr:SetPoint(p, target, rp, x or 0, y or 0)
+                        nr:SetPoint(p, target, rp or p, x or 0, y or 0)
                     end
                 end
-                local w, h = r:GetSize()
-                if w and w > 0 and h and h > 0 then nr:SetSize(w, h) end
-                if not isMask then
-                    pcall(function() nr:SetBlendMode(r:GetBlendMode()) end)
-                    pcall(function() nr:SetVertexColor(r:GetVertexColor()) end)
-                    nr:SetAlpha(r:GetAlpha())
-                end
+                local rw, rh = r:GetSize()
+                if rw and rw > 0 and rh and rh > 0 then nr:SetSize(rw, rh) end
+                pcall(function() nr:SetBlendMode(r:GetBlendMode()) end)
+                pcall(function() nr:SetVertexColor(r:GetVertexColor()) end)
+                nr:SetAlpha(r:GetAlpha())
                 nr:SetShown(r:IsShown())
-                if isMask then mask = nr
-                elseif atlas and atlas:find("selected") then btn.selTex[#btn.selTex + 1] = nr; nr:Hide()
-                elseif atlas and atlas:find("hover") then btn.hoverTex[#btn.hoverTex + 1] = nr; nr:Hide()
-                elseif not atlas then icon = nr end
-            end
-            if icon then
-                -- The source tab only sizes its icon and mask once the character window has been shown,
-                -- so never rely on the copied geometry: centre the icon and make the mask follow it.
-                icon:ClearAllPoints()
-                icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
-                local s = math.min(btn:GetWidth(), btn:GetHeight()) * 0.58
-                icon:SetSize(s, s)
-                icon:SetTexCoord(0, 1, 0, 1)
-                icon:Show()
-                if mask then
-                    mask:ClearAllPoints()
-                    mask:SetAllPoints(icon)
-                    icon:AddMaskTexture(mask)
-                end
-            end
-        end)
+                if atlas:find("selected") then btn.selTex[#btn.selTex + 1] = nr; nr:Hide()
+                elseif atlas:find("hover") then btn.hoverTex[#btn.hoverTex + 1] = nr; nr:Hide() end
+                copied = copied + 1
+            end)
+            if not ok then map[r] = nil end
+        end
     end
-    if not btn or not btn.selTex then
-        btn = CreateFrame("Button", nil, parent)
-        btn:SetSize(48, 48)
+    if copied == 0 or #btn.selTex == 0 then
         local back = btn:CreateTexture(nil, "BACKGROUND")
         back:SetAllPoints(); back:SetColorTexture(0.08, 0.06, 0.04, 0.95)
-        local ic = btn:CreateTexture(nil, "ARTWORK")
-        ic:SetPoint("TOPLEFT", 6, -6); ic:SetPoint("BOTTOMRIGHT", -6, 6); ic:SetTexture(iconPath)
-        local sel = btn:CreateTexture(nil, "OVERLAY")
+        local sel = btn:CreateTexture(nil, "BORDER")
         sel:SetAllPoints(); sel:SetColorTexture(1, 0.82, 0, 0.3); sel:Hide()
-        local hov = btn:CreateTexture(nil, "OVERLAY")
+        local hov = btn:CreateTexture(nil, "BORDER")
         hov:SetAllPoints(); hov:SetColorTexture(1, 1, 1, 0.15); hov:Hide()
-        btn.selTex, btn.hoverTex = { sel }, { hov }
+        btn.selTex[#btn.selTex + 1] = sel
+        btn.hoverTex[#btn.hoverTex + 1] = hov
     end
+
     btn:SetFrameLevel(parent:GetFrameLevel() + 10)
+    holder:SetFrameLevel(btn:GetFrameLevel() + 5)
     function btn:SetSelected(on)
         for _, t in ipairs(self.selTex) do t:SetShown(on) end
     end
@@ -798,7 +791,7 @@ end
 
 local function CreateTabNow(spec)
     local parent = journalFrame
-    local btn = CreateSideTab(parent, spec.icon or "Interface\Icons\INV_Misc_Book_09")
+    local btn = CreateSideTab(parent, spec.icon or "Interface\\Icons\\INV_Misc_Book_09")
     local index = #sideTabs + 1
     if index == 1 then
         btn:SetPoint("TOPLEFT", parent, "TOPRIGHT", -4, -50)
@@ -825,7 +818,7 @@ end
 function ns.BuildSideTabs(f)
     if sideTabs[1] then return end
     -- 1: the diary itself. Selecting it deselects every other tab, which hides their content.
-    CreateTabNow({ icon = "Interface\Icons\INV_Misc_Book_09", tooltip = "Diario de Aventuras" })
+    CreateTabNow({ icon = "Interface\\Icons\\INV_Misc_Book_09", tooltip = "Diario de Aventuras" })
     SelectSideTab(1)
     for _, spec in ipairs(queuedTabs) do spec.index = CreateTabNow(spec) end
     wipe(queuedTabs)
@@ -842,4 +835,38 @@ AdventureJournalTabs = {
         return 1 + #queuedTabs
     end,
     Select = function(index) if sideTabs[1] then SelectSideTab(index or 1) end end,
+    -- Diagnostic: /dump AdventureJournalTabs.Info()
+    Info = function()
+        local function A(f) return (f.GetEffectiveAlpha and f:GetEffectiveAlpha()) or (f.GetAlpha and f:GetAlpha()) or -1 end
+        local out = {}
+        for i, t in ipairs(sideTabs) do
+            local b = t.btn
+            local o, h = b.ownIcon, b.iconHolder
+            out[#out + 1] = string.format(
+                "[%d] pestaña %.0fx%.0f visible=%s nivel=%s capa=%s alfa=%.2f | icono=%s textura=%s %.0fx%.0f visible=%s alfaReal=%.2f | marcoIcono nivel=%s visible=%s | texturasSeleccion=%d",
+                i, b:GetWidth(), b:GetHeight(), tostring(b:IsShown()), tostring(b:GetFrameLevel()), tostring(b:GetFrameStrata()),
+                A(b), o and "si" or "NO", o and tostring(o:GetTexture()) or "-", o and o:GetWidth() or 0,
+                o and o:GetHeight() or 0, o and tostring(o:IsShown()) or "-", o and A(o) or 0,
+                h and tostring(h:GetFrameLevel()) or "-", h and tostring(h:IsShown()) or "-", #b.selTex)
+        end
+        local probe = UIParent:CreateTexture()
+        probe:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
+        local p1 = tostring(probe:GetTexture())
+        probe:SetTexture(134400)
+        out[#out + 1] = "pruebas: ruta de icono=" .. p1 .. "  id 134400=" .. tostring(probe:GetTexture())
+        for i, t in ipairs(sideTabs) do
+            out[#out + 1] = "[" .. i .. "] ruta pedida=" .. tostring(t.btn.ownPath) .. " aplicada=" .. tostring(t.btn.ownApplied)
+        end
+        out[#out + 1] = journalFrame and ("libro: nivel=" .. journalFrame:GetFrameLevel() .. " capa=" .. journalFrame:GetFrameStrata())
+            or "libro: aún no creado"
+        return table.concat(out, "\n")
+    end,
 }
+
+-- Diagnostic: /ajtabs prints how the side tabs and their icons were built (/dump does not evaluate here).
+SLASH_AJTABS1 = "/ajtabs"
+SlashCmdList["AJTABS"] = function()
+    local ok, text = pcall(AdventureJournalTabs.Info)
+    if not ok then print("|cff33ff99[Diario tabs]|r error: " .. tostring(text)) return end
+    for line in (text .. "\n"):gmatch("(.-)\n") do print("|cff33ff99[Diario tabs]|r " .. line) end
+end
