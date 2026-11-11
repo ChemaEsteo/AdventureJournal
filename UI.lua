@@ -852,38 +852,4 @@ AdventureJournalTabs = {
         return 1 + #queuedTabs
     end,
     Select = function(index) if sideTabs[1] then SelectSideTab(index or 1) end end,
-    -- Diagnostic: /dump AdventureJournalTabs.Info()
-    Info = function()
-        local function A(f) return (f.GetEffectiveAlpha and f:GetEffectiveAlpha()) or (f.GetAlpha and f:GetAlpha()) or -1 end
-        local out = {}
-        for i, t in ipairs(sideTabs) do
-            local b = t.btn
-            local o, h = b.ownIcon, b.iconHolder
-            out[#out + 1] = string.format(
-                "[%d] pestaña %.0fx%.0f visible=%s nivel=%s capa=%s alfa=%.2f | icono=%s textura=%s %.0fx%.0f visible=%s alfaReal=%.2f | marcoIcono nivel=%s visible=%s | texturasSeleccion=%d",
-                i, b:GetWidth(), b:GetHeight(), tostring(b:IsShown()), tostring(b:GetFrameLevel()), tostring(b:GetFrameStrata()),
-                A(b), o and "si" or "NO", o and tostring(o:GetTexture()) or "-", o and o:GetWidth() or 0,
-                o and o:GetHeight() or 0, o and tostring(o:IsShown()) or "-", o and A(o) or 0,
-                h and tostring(h:GetFrameLevel()) or "-", h and tostring(h:IsShown()) or "-", #b.selTex)
-        end
-        local probe = UIParent:CreateTexture()
-        probe:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-        local p1 = tostring(probe:GetTexture())
-        probe:SetTexture(134400)
-        out[#out + 1] = "pruebas: ruta de icono=" .. p1 .. "  id 134400=" .. tostring(probe:GetTexture())
-        for i, t in ipairs(sideTabs) do
-            out[#out + 1] = "[" .. i .. "] ruta pedida=" .. tostring(t.btn.ownPath) .. " aplicada=" .. tostring(t.btn.ownApplied)
-        end
-        out[#out + 1] = journalFrame and ("libro: nivel=" .. journalFrame:GetFrameLevel() .. " capa=" .. journalFrame:GetFrameStrata())
-            or "libro: aún no creado"
-        return table.concat(out, "\n")
-    end,
 }
-
--- Diagnostic: /ajtabs prints how the side tabs and their icons were built (/dump does not evaluate here).
-SLASH_AJTABS1 = "/ajtabs"
-SlashCmdList["AJTABS"] = function()
-    local ok, text = pcall(AdventureJournalTabs.Info)
-    if not ok then print("|cff33ff99[Diario tabs]|r error: " .. tostring(text)) return end
-    for line in (text .. "\n"):gmatch("(.-)\n") do print("|cff33ff99[Diario tabs]|r " .. line) end
-end
