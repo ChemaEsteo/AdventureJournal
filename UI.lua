@@ -775,7 +775,7 @@ local function CreateSideTab(parent, iconPath)
     return btn
 end
 
-local function SelectSideTab(index)
+local function SelectSideTabCore(index)
     for i, t in ipairs(sideTabs) do
         if i == index then
             t.btn:SetSelected(true)
@@ -787,6 +787,23 @@ local function SelectSideTab(index)
             t.selected = false
         end
     end
+end
+
+-- The diary's own controls (previous / next day, page number, delete) belong to the diary, so they are
+-- hidden while another addon's tab is selected. A tab can keep them with keepDiaryControls = true.
+local function SetDiaryControls(shown)
+    if not journalFrame then return end
+    for _, key in ipairs({ "prevButton", "nextButton", "pageNumber", "deleteButton" }) do
+        local widget = journalFrame[key]
+        if widget then widget:SetShown(shown) end
+    end
+end
+
+local function SelectSideTab(index)
+    SelectSideTabCore(index)
+    local entry = sideTabs[index or 1]
+    local show = (index or 1) == 1 or (entry and entry.spec.keepDiaryControls)
+    SetDiaryControls(show and true or false)
 end
 
 local function CreateTabNow(spec)
